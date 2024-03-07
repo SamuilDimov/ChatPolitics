@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ChatScreen extends StatefulWidget {
   @override
@@ -7,21 +8,28 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final List<String> _messages = [];
   final TextEditingController _textController = TextEditingController();
 
-void _sendMessage() {
+
+
+void _sendMessage() async {
   if (_textController.text.isNotEmpty) {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
-      String senderEmail = currentUser.email ?? "Unknown"; // Default to "Unknown" if email is null
-      setState(() {
-        _messages.add("${_textController.text}, $senderEmail"); // Remove .text from senderEmail
-        _textController.clear();
-      });
+      String senderEmail = currentUser.email ?? "Unknown";
+      Message message = Message(_textController.text, senderEmail);
+      try {
+        await FirebaseFirestore.instance.collection('messages').add(message.toMap());
+        setState(() {
+          _textController.clear();
+        });
+      } catch (error) {
+        print("Error sending message: $error");
+      }
     }
   }
 }
+
 
   @override
   Widget build(BuildContext context) {
@@ -30,22 +38,35 @@ void _sendMessage() {
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              itemCount: _messages.length,
-              itemBuilder: (context, index) => ListTile(
-                title: Text(_messages[index]),
-              ),
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('messages').snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return CircularProgressIndicator(); // Loading indicator
+                }
+                List<Message> messages = [];
+                snapshot.data!.docs.forEach((doc) {
+                  messages.add(Message(doc['text'], doc['senderEmail']));
+                });
+                return ListView.builder(
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) => ListTile(
+                    title: Text('${messages[index].senderEmail}: ${messages[index].text}'),
+                  ),
+                );
+              },
             ),
           ),
+          // Add input field for typing messages
           Padding(
-            padding: EdgeInsets.all(8.0),
+            padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
                 Expanded(
                   child: TextField(
                     controller: _textController,
                     decoration: InputDecoration(
-                      hintText: "Enter a message",
+                      hintText: 'Type your message...',
                     ),
                   ),
                 ),
@@ -68,8 +89,10 @@ class Message {
 
   Message(this.text, this.senderEmail);
 
-  @override
-  String toString() {
-    return '$senderEmail: $text';
+  Map<String, dynamic> toMap() {
+    return {
+      'text': text,
+      'senderEmail': senderEmail,
+    };
   }
 }
